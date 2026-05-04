@@ -1,0 +1,173 @@
+# Terraform JWT Authorization Demo
+#
+# This workflow demonstrates the full GitHub Actions integration described in
+# https://github.com/JanssenProject/jans/tree/main/jans-cedarling/cedarling_opa/demo/terraform-jwt
+#
+# Each job:
+#   1. Spins up the Cedarling-OPA server in production mode (real JWT validation)
+#      using Docker Compose — no external server required.
+#   2. Delegates authorization + Terraform to the reusable composite action from
+#      JanssenProject/jans, which fetches the GitHub OIDC token, queries OPA,
+#      and runs Terraform only when the Cedar policies allow it.
+#   3. Tears down the OPA container after the job (even on failure).
+#
+# Before this workflow can succeed you must:
+#   1. Replace moabu/cedarling-opa-terraform-jwt in the three policy-store/policies/*.cedar files
+#      with this repository's full name (e.g. "acme/infra").
+#   2. Create a GitHub Environment named "production" with required reviewers
+#      (Settings → Environments → production → Required reviewers).
+
+name: Terraform (JWT-authorized)
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # ── Plan (allowed on any branch from the trusted repo) ──────────────────────
+  terraform-plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required to request the GitHub OIDC token
+      contents: read
+
+    env:
+      OPA_URL: http://localhost:8181
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE || 'staging' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Start OPA (production mode)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+          echo "Waiting for OPA to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8181/health > /dev/null 2>&1; then
+              echo "OPA is healthy after ${i} attempts"; exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: OPA did not become healthy in time" >&2; exit 1
+
+      - name: Terraform plan (JWT-authorized)
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        with:
+          opa_url: http://localhost:8181
+          workspace: ${{ vars.TF_WORKSPACE || 'staging' }}
+          terraform_command: plan
+          terraform_working_directory: .
+
+      - name: Stop OPA
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+
+  # ── Apply to staging (main branch only) ─────────────────────────────────────
+  terraform-apply-staging:
+    name: Terraform Apply — staging
+    runs-on: ubuntu-latest
+    needs: terraform-plan
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      OPA_URL: http://localhost:8181
+      TF_WORKSPACE: staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Start OPA (production mode)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+          echo "Waiting for OPA to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8181/health > /dev/null 2>&1; then
+              echo "OPA is healthy after ${i} attempts"; exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: OPA did not become healthy in time" >&2; exit 1
+
+      - name: Terraform apply — staging (JWT-authorized)
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        with:
+          opa_url: http://localhost:8181
+          workspace: staging
+          terraform_command: apply -auto-approve
+          terraform_working_directory: .
+
+      - name: Stop OPA
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+
+  # ── Apply to production (requires GitHub Environment approval) ───────────────
+  terraform-apply-production:
+    name: Terraform Apply — production
+    runs-on: ubuntu-latest
+    needs: terraform-apply-staging
+    if: github.ref == 'refs/heads/main'
+    # The "production" environment requires manual approval from designated reviewers
+    # (configured in GitHub Settings → Environments → production → Required reviewers).
+    # GitHub only injects `environment: "production"` into the OIDC token after a
+    # reviewer approves — the Cedar policy checks this claim, so bypassing the gate
+    # is cryptographically impossible.
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      OPA_URL: http://localhost:8181
+      TF_WORKSPACE: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init
+        run: terraform init
+
+      - name: Start OPA (production mode)
+        run: |
+          docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+          echo "Waiting for OPA to become healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8181/health > /dev/null 2>&1; then
+              echo "OPA is healthy after ${i} attempts"; exit 0
+            fi
+            sleep 2
+          done
+          echo "ERROR: OPA did not become healthy in time" >&2; exit 1
+
+      - name: Terraform apply — production (JWT-authorized + Environment approval)
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        with:
+          opa_url: http://localhost:8181
+          workspace: production
+          terraform_command: apply -auto-approve
+          terraform_working_directory: .
+
+      - name: Stop OPA
+        if: always()
+        run: docker compose -f docker-compose.yml -f docker-compose.prod.yml down
