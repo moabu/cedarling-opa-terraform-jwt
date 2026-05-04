@@ -59,7 +59,7 @@ jobs:
           echo "ERROR: OPA did not become healthy in time" >&2; exit 1
 
       - name: Terraform plan (JWT-authorized)
-        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@ci-add-cedarling-opa-terraform
         with:
           opa_url: http://localhost:8181
           workspace: ${{ vars.TF_WORKSPACE || 'staging' }}
@@ -107,7 +107,7 @@ jobs:
           echo "ERROR: OPA did not become healthy in time" >&2; exit 1
 
       - name: Terraform apply — staging (JWT-authorized)
-        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@ci-add-cedarling-opa-terraform
         with:
           opa_url: http://localhost:8181
           workspace: staging
@@ -161,7 +161,7 @@ jobs:
           echo "ERROR: OPA did not become healthy in time" >&2; exit 1
 
       - name: Terraform apply — production (JWT-authorized + Environment approval)
-        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@main
+        uses: JanssenProject/jans/jans-cedarling/cedarling_opa/demo/terraform-jwt/.github/actions/tf-jwt-authz@ci-add-cedarling-opa-terraform
         with:
           opa_url: http://localhost:8181
           workspace: production
